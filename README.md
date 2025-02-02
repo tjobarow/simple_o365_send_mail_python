@@ -1,7 +1,9 @@
 
 # Simple Send Mail for Microsoft Graph API
 
-A lightweight (requiring only one external dependency - ```requests```) python wrapper over the [user: sendMail](https://learn.microsoft.com/en-us/graph/api/user-sendmail?view=graph-rest-1.0&tabs=http) API endpoint, allowing you to easily integrate mail functionality into any Python workflow. Supports including file attachments, CC recipients, and BCC recipients.
+A lightweight (requiring only one external dependency - ```requests``` to run) python wrapper over the [user: sendMail](https://learn.microsoft.com/en-us/graph/api/user-sendmail?view=graph-rest-1.0&tabs=http) API endpoint, allowing you to easily integrate mail functionality into any Python workflow. Supports including file attachments, CC recipients, and BCC recipients.
+
+_Note: While the wrapper does only require ```requests``` to run, you do need to have ```build``` and ```wheel``` installed to build the package from source._
 
 ## Requirements
 
