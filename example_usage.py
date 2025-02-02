@@ -1,4 +1,6 @@
 import os  # Import OS to load HTML email templates into string variables
+import csv
+import io
 
 # From simple_o365_send_mail, import the SimpleSendMail class, then import
 # SimpleFileAttachment, BodyType, EmailImportance, as needed.
@@ -102,7 +104,7 @@ Required Parameters:
     the built-in class EmailImportance, and references EmailImportance.High to
     specify "high".
 """
-# ADVANCED USAGE EXAMPLE #1 - HTML email body, CC recipients, BCC recipient, 
+# ADVANCED USAGE EXAMPLE #1 - HTML email body, CC recipients, BCC recipient,
 # and multiple direct recipients
 mail_sender.send_mail(
     # Provide a subject
@@ -207,4 +209,38 @@ mail_sender.send_mail(
             filename="this_isnt_a_secret_plan.pdf",
         ),
     ],
+)
+
+# ADVANCED USAGE EXAMPLE #4 - CREATING A FILE ATTACHMENT FROM FILE BYTES
+"""
+If you have a 'file' to attach that does not reside within the local filesystem,
+such as one you created as a bytes object in memory, you can provide the
+SimpleFileAttachment class the bytes via the file_bytes parameter to create an
+attachment based on those bytes.
+
+If you use the file_bytes parameter, you MUST provide a valid filename and
+content_type parameter, and CANNOT provide a filepath parameter.
+"""
+# This 2d list will be converted to an in-memory CSV object
+test_csv_data: list = [
+    ["Name", "Role"],
+    ["Lando Norris", "F1 Driver"],
+    ["Oscar Piastri", "F1 Driver"],
+    ["Andrea Stella", "Small Boss Man"],
+    ["Zac Brown", "Big Boss Man"],
+]
+# Creating an empty BytesIO object in memory
+csv_output = io.BytesIO()
+# Creating a TextIOWrapper and passing it to the csv.writer function
+csv_writer = csv.writer(io.TextIOWrapper(csv_output, encoding="utf-8", newline=""))
+# Writing the list data to the 'in-memory CSV' object
+csv_writer.writerows(test_csv_data)
+# Getting the bytes for the 'in-memory csv' object.
+# The SimpleFileAttachment class will encode the bytes using utf-8 for you
+csv_bytes = csv_output.getvalue()
+
+# Creating a SimpleFileAttachment using the csv_bytes, which requires you to
+# provide a filename and content_type
+SimpleFileAttachment(
+    filebytes=csv_bytes, filename="mclaren_employees.csv", content_type="text/csv"
 )
