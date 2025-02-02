@@ -47,50 +47,86 @@ class SimpleFileAttachment:
 
     def __init__(
         self,
-        filepath: str,
+        filepath: str | None = None,
         filename: str | None = None,
+        filebytes: bytes | None = None,
         content_type: str | None = None,
     ):
-        self.ATTACHMENT_FILEPATH: str = filepath
-        # If no filename provided extract from filepath
-        if filename is None:
-            if "/" in filepath:
-                path_delimiter: str = "/"
-            else:
-                path_delimiter: str = "\\"
-            # Split the path by slash
-            attach_path_arr: list[str] = filepath.split(path_delimiter)
-            self.ATTACHMENT_FILENAME: str = attach_path_arr.pop(
-                len(attach_path_arr) - 1
+        # Validate at least one of the filepath or filebytes parameters are not none.
+        if filepath is None and filebytes is None:
+            raise ValueError(
+                "SimpleFileAttachment class requires either the filepath OR filebytes to not be None, but both parameters were None!"
             )
-        # Else use the provided name
-        else:
-            self.ATTACHMENT_FILENAME: str = filename
-        # IF no content type was provided
-        if content_type is None:
-            # Try to guess the type
-            type_guesses: tuple[str] = mimetypes.guess_type(self.ATTACHMENT_FILEPATH)
-            # but if no type could be guessed, raise TypeError
-            if type_guesses[0] is None:
-                raise TypeError(
-                    f"The content type of provided filepath {self.ATTACHMENT_FILEPATH} could not be guessed. Please provide a valid content_type when initalizing the SimpleFileAttachment class."
+        elif filepath is not None and filebytes is not None:
+            raise RuntimeError(
+                "Both a filepath and filebytes were provided, but only one can be used. Please decide which to use and remove the other option."
+            )
+
+        # If the filebytes are provided, you also need to specify the filename and content_type
+        if filebytes is not None and filename is None:
+            raise ValueError(
+                "The value of filename must not be None when filebytes are provided, but filename was None."
+            )
+        if filebytes is not None and content_type is None:
+            raise ValueError(
+                "The value of content_type must not be None when filebytes are provided, but content_type was None."
+            )
+
+        # IF the filepath was provided
+        if filepath is not None:
+            self.ATTACHMENT_FILEPATH: str = filepath
+
+            # If no filename provided extract from filepath
+            if filename is None:
+                if "/" in filepath:
+                    path_delimiter: str = "/"
+                else:
+                    path_delimiter: str = "\\"
+                # Split the path by slash
+                attach_path_arr: list[str] = filepath.split(path_delimiter)
+                self.ATTACHMENT_FILENAME: str = attach_path_arr.pop(
+                    len(attach_path_arr) - 1
                 )
-            # Else if it could be guessed, set that as the class CONTENT_TYPE
+            # Else use the provided name
             else:
-                self.CONTENT_TYPE: str = type_guesses[0]
-        # Else use the provided content type
-        else:
-            self.CONTENT_TYPE: str = content_type
-        # Load the file into memory as bytes
-        try:
-            file = open(self.ATTACHMENT_FILEPATH, "rb")
-            self.FILE_BYTES: bytes = file.read()
-        except FileNotFoundError:
-            raise FileNotFoundError(
-                f"SimpleFileAttachment could not locate the file at the provided path: {self.ATTACHMENT_FILEPATH}"
+                self.ATTACHMENT_FILENAME: str = filename
+            # IF no content type was provided
+            if content_type is None:
+                # Try to guess the type
+                type_guesses: tuple[str] = mimetypes.guess_type(
+                    self.ATTACHMENT_FILEPATH
+                )
+                # but if no type could be guessed, raise TypeError
+                if type_guesses[0] is None:
+                    raise TypeError(
+                        f"The content type of provided filepath {self.ATTACHMENT_FILEPATH} could not be guessed. Please provide a valid content_type when initalizing the SimpleFileAttachment class."
+                    )
+                # Else if it could be guessed, set that as the class CONTENT_TYPE
+                else:
+                    self.CONTENT_TYPE: str = type_guesses[0]
+            # Else use the provided content type
+            else:
+                self.CONTENT_TYPE: str = content_type
+            # Load the file into memory as bytes
+            try:
+                file = open(self.ATTACHMENT_FILEPATH, "rb")
+                self.FILE_BYTES: bytes = file.read()
+            except FileNotFoundError:
+                raise FileNotFoundError(
+                    f"SimpleFileAttachment could not locate the file at the provided path: {self.ATTACHMENT_FILEPATH}"
+                )
+            # B64 encode then utf-8 decode file so it can be sent in JSON body of request
+            self.ENCODED_CONTENT: str = base64.b64encode(self.FILE_BYTES).decode(
+                "utf-8"
             )
-        # B64 encode then utf-8 decode file so it can be sent in JSON body of request
-        self.ENCODED_CONTENT: str = base64.b64encode(self.FILE_BYTES).decode("utf-8")
+
+        elif filebytes is not None:
+            self.ATTACHMENT_FILENAME: str = filename
+            self.CONTENT_TYPE: str = content_type
+            self.FILE_BYTES: bytes = filebytes
+            self.ENCODED_CONTENT: str = base64.b64encode(self.FILE_BYTES).decode(
+                "utf-8"
+            )
 
     def __iter__(self):
         yield "@odata.type", "#microsoft.graph.fileAttachment"
