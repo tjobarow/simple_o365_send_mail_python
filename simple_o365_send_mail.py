@@ -486,28 +486,39 @@ class SimpleSendMail:
                 #self._logger.debug(f"Added single attachment: {str(attachments)}")
 
         #self._logger.debug(f"Prepared mail body: {json.dumps(mail_playload,indent=4)}")
+        
         #Keep track of the number of tries, so if max retries is reached, we can raise err
-        try_count: int = 0
-        while try_count < self._max_retries:
+        try_count: int = 1
+        #A conditional within the while loop will dictate when we break out of it
+        while True:
             try:
-                self._logger.debug(f"Trying to send mail via MS Graph API (Try #{try_count}/{self._max_retries})...")
+                self._logger.debug("Trying to send mail via MS Graph API")
                 # Try to send request and get a response
                 response = requests.post(url=mail_url, headers=headers, json=mail_playload)
-                #Increment the count of tries by 1
-                try_count+=1
-                response.raise_for_status()  # Make sure the response is 2xx status code
+                # Make sure the response is 2xx status code, otherwise raise an error
+                response.raise_for_status()
                 self._logger.info(
                     f"Successfully sent email from {self._source_mail_address} to {recipient_emails}"
                 )
+                #If the request was successful, break out of the while loop
                 break
             # Catch a request error (such as non-2xx status code returned)
             except requests.exceptions.HTTPError as http_err:
+                #If the HTTPError is due to rate limits being exceeded (429 returned)
                 if response.status_code == 429:
+                    if try_count > self._max_retries:
+                        raise requests.exceptions.HTTPError(f"SimpleSendMail failed to send email to {str(recipient_emails)} due to rate limits being met. The maximum number of retries ({self._max_retries}) was met or exceeded.")
+                    # Cast response.headers from CaseInsensitiveDict to regular dict
                     resp_headers=dict(response.headers)
+                    # Do some logging
                     self._logger.warning(response.text)
                     self._logger.warning(f"Rate limit was exceeded when trying to email {str(recipient_emails)}. Retrying in {resp_headers['Retry-After']} seconds...")
+                    #Cast the Retry-After header to int and then sleep for that amount of seconds
+                    #The value of Retry-After represents the # of seconds until throttling is let up
                     time.sleep(int(resp_headers['Retry-After']))
-                    continue
+                    #Increment the count of tries by 1
+                    try_count+=1
+                    self._logger.debug(f"Will attempt to retry request (Try #{try_count}/{self._max_retries})...")
                 else:
                     self._logger.exception(http_err)
                     raise http_err
