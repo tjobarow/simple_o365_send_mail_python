@@ -120,6 +120,7 @@ class SimpleSendMail:
         source_mail_address: str,
         oauth_scopes: list = ["https://graph.microsoft.com/.default"],
         verbose: bool = False,
+        max_retries: int = 5
     ):
         """Initalizes the SimpleSendMail class.
 
@@ -151,6 +152,7 @@ class SimpleSendMail:
         """
         # Get a logger object, will inherit from calling code if possible
         self._logger: logging.Logger = logging.getLogger(__name__)
+        self._max_retries: int = max_retries
 
         # If verbose was provided
         if verbose:
@@ -479,24 +481,40 @@ class SimpleSendMail:
                 if not isinstance(attachments,SimpleFileAttachment):
                     self._logger.exception(f"Attachment is of type {type(attachments)} but must be of type SimpleFileAttachment.")
                     raise TypeError(f"Attachment is of type {type(attachments)} but must be of type SimpleFileAttachment.")
-                self._logger.debug(f"A single file attachment was provided to function: {attachments.ATTACHMENT_FILENAME}")
+                #self._logger.debug(f"A single file attachment was provided to function: {attachments.ATTACHMENT_FILENAME}")
                 mail_playload["message"]["attachments"].append(dict(attachments))
-                self._logger.debug(f"Added single attachment: {str(attachments)}")
+                #self._logger.debug(f"Added single attachment: {str(attachments)}")
 
-        self._logger.debug(f"Prepared mail body: {json.dumps(mail_playload,indent=4)}")
-        try:
-            self._logger.debug("Trying to send mail via MS Graph API...")
-            # Try to send request and get a response
-            response = requests.post(url=mail_url, headers=headers, json=mail_playload)
-            response.raise_for_status()  # Make sure the response is 2xx status code
-            self._logger.info(
-                f"Successfully sent email from {self._source_mail_address} to {recipient_emails}"
-            )
-        # Catch a request error (such as non-2xx status code returned)
-        except requests.exceptions.RequestException as e:
-            self._logger.debug(response.text)
-            self._logger.exception(
-                f"An error occurred while attempting to send an email to {recipient_emails}"
-            )
-            self._logger.exception(e)
-            raise e
+        #self._logger.debug(f"Prepared mail body: {json.dumps(mail_playload,indent=4)}")
+        #Keep track of the number of tries, so if max retries is reached, we can raise err
+        try_count: int = 0
+        while try_count < self._max_retries:
+            try:
+                self._logger.debug(f"Trying to send mail via MS Graph API (Try #{try_count}/{self._max_retries})...")
+                # Try to send request and get a response
+                response = requests.post(url=mail_url, headers=headers, json=mail_playload)
+                #Increment the count of tries by 1
+                try_count+=1
+                response.raise_for_status()  # Make sure the response is 2xx status code
+                self._logger.info(
+                    f"Successfully sent email from {self._source_mail_address} to {recipient_emails}"
+                )
+                break
+            # Catch a request error (such as non-2xx status code returned)
+            except requests.exceptions.HTTPError as http_err:
+                if response.status_code == 429:
+                    resp_headers=dict(response.headers)
+                    self._logger.warning(response.text)
+                    self._logger.warning(f"Rate limit was exceeded when trying to email {str(recipient_emails)}. Retrying in {resp_headers['Retry-After']} seconds...")
+                    time.sleep(int(resp_headers['Retry-After']))
+                    continue
+                else:
+                    self._logger.exception(http_err)
+                    raise http_err
+            except requests.exceptions.RequestException as e:
+                self._logger.debug(response.text)
+                self._logger.exception(
+                    f"An error occurred while attempting to send an email to {recipient_emails}"
+                )
+                self._logger.exception(e)
+                raise e
