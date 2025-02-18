@@ -543,11 +543,11 @@ class SimpleSendMail:
                     raise TypeError(
                         f"Attachment is of type {type(attachments)} but must be of type SimpleFileAttachment."
                     )
-                # self._logger.debug(f"A single file attachment was provided to function: {attachments.ATTACHMENT_FILENAME}")
+                self._logger.debug(f"A single file attachment was provided to function: {attachments.ATTACHMENT_FILENAME}")
                 mail_playload["message"]["attachments"].append(dict(attachments))
-                # self._logger.debug(f"Added single attachment: {str(attachments)}")
+                self._logger.debug(f"Added single attachment: {str(attachments)}")
 
-        #self._logger.debug(f"Prepared mail body: {json.dumps(mail_playload,indent=4)}")
+        self._logger.debug(f"Prepared mail body: {json.dumps(mail_playload,indent=4)}")
         try:
             self._logger.debug("Trying to send mail via MS Graph API")
             # Sending a post request to MS Graph API
