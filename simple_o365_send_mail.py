@@ -149,7 +149,9 @@ class SimpleFileAttachment:
         }
 
     def __str__(self) -> str:
-        return json.dumps(self.__dict__(), indent=2)
+        bytes_removed: dict = self.__dict__().copy()
+        bytes_removed.pop('contentBytes')
+        return json.dumps(bytes_removed, indent=2)
 
 
 class SimpleSendMail:
@@ -162,6 +164,7 @@ class SimpleSendMail:
         source_mail_address: str,
         oauth_scopes: list = ["https://graph.microsoft.com/.default"],
         verbose: bool = False,
+        log_mail_payloads: bool = False,
         max_retries: int = 5
     ):
         """Initalizes the SimpleSendMail class.
@@ -195,6 +198,7 @@ class SimpleSendMail:
         # Get a logger object, will inherit from calling code if possible
         self._logger: logging.Logger = logging.getLogger(__name__)
         self._max_retries: int = max_retries
+        self._log_mail_payloads: bool = log_mail_payloads
 
         # If verbose was provided
         if verbose:
@@ -582,8 +586,10 @@ class SimpleSendMail:
                 self._logger.debug(f"A single file attachment was provided to function: {attachments.ATTACHMENT_FILENAME}")
                 mail_playload["message"]["attachments"].append(dict(attachments))
                 self._logger.debug(f"Added single attachment: {str(attachments)}")
-
-        self._logger.debug(f"Prepared mail body: {json.dumps(mail_playload,indent=4)}")
+        
+        if self._log_mail_payloads:
+            self._logger.debug(f"Prepared mail body: {json.dumps(mail_playload,indent=4)}")
+        
         try:
             self._logger.debug("Trying to send mail via MS Graph API")
             # Sending a post request to MS Graph API
