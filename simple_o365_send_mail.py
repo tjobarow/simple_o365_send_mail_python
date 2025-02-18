@@ -26,6 +26,12 @@ import requests
 from functools import wraps
 
 
+class MsGraphRateLimitExceededError(Exception):
+    def __init__(self, message: str, retry_after: int = 90):
+        super().__init__(message)
+        self.retry_after: int = retry_after
+
+
 class EmailImportance(str, Enum):
     Low = ("low",)
     Normal = ("normal",)
@@ -236,7 +242,9 @@ class SimpleSendMail:
             )
             <= 0
         ):
-            self._logger.exception("client_secret is an empty string. Raising exception.")
+            self._logger.exception(
+                "client_secret is an empty string. Raising exception."
+            )
             raise ValueError("client_secret must not be an empty string.")
         if (
             len(
@@ -375,6 +383,38 @@ class SimpleSendMail:
 
         return check_token_expiration
 
+    def retry_request(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            req_attempt: int = 0
+            while req_attempt < self._max_retries:
+                try:
+                    self._logger.debug(
+                        f"Retry Counter: {req_attempt}/{self._max_retries}"
+                    )
+                    return func(self, *args, **kwargs)
+                except MsGraphRateLimitExceededError as error:
+                    self._logger.warning(
+                        "MSGraph rate limit was exceeded."
+                        + f" Retrying in {error.retry_after} seconds..."
+                    )
+                    #Enable for testing max retries
+                    #time.sleep(1)
+                    time.sleep(error.retry_after)
+                    req_attempt += 1
+            self._logger.warning(
+                "Max retries was reached, raising "
+                + "MsGraphRateLimitExceededError to calling function."
+            )
+            raise MsGraphRateLimitExceededError(
+                "While attempting to retry request to MS Graph API, "
+                + "the maximum number of retries was met without a successful "
+                + f"request being made. (Retry Counter: {req_attempt} - "
+                + f"Max Retries: {self._max_retries})"
+            )
+        return wrapper
+
+    @retry_request
     @check_token_validity
     def send_mail(
         self,
@@ -422,24 +462,34 @@ class SimpleSendMail:
         }
         # Add save to sent items if set to true (default is True)
         if saveToSentItems:
-            self._logger.info(f"Message will be saved in sent items for {self._source_mail_address}.")
+            self._logger.info(
+                f"Message will be saved in sent items for {self._source_mail_address}."
+            )
             mail_playload.update({"saveToSentItems": True})
-        
+
         # Check if recipients is a list and if so, add all recipients, if not just add oen
         if isinstance(recipient_emails, list):
             self._logger.debug(
                 f"Recipients is a list of emails - add all recipients {recipient_emails}"
             )
             for email in recipient_emails:
-                mail_playload["message"]['toRecipients'].append({"emailAddress": {"address": email}})
+                mail_playload["message"]["toRecipients"].append(
+                    {"emailAddress": {"address": email}}
+                )
         else:
-            self._logger.debug("Recipient emails is a single email - adding single email")
-            mail_playload["message"]['toRecipients'].append({"emailAddress": {"address": recipient_emails}})
-        
+            self._logger.debug(
+                "Recipient emails is a single email - adding single email"
+            )
+            mail_playload["message"]["toRecipients"].append(
+                {"emailAddress": {"address": recipient_emails}}
+            )
+
         # The next few conditionals will add any additional recipients, set CC and BCC recipients
         if cc_recipient_emails is not None:
             self._logger.info("Message will be sent to list of CC recipients.")
-            self._logger.debug(f"cc_recipient_emails list was provided - adding CC recipients to payload: {cc_recipient_emails}")
+            self._logger.debug(
+                f"cc_recipient_emails list was provided - adding CC recipients to payload: {cc_recipient_emails}"
+            )
             mail_playload["message"].update({"ccRecipients": []})
 
             for cc_email in cc_recipient_emails:
@@ -452,7 +502,9 @@ class SimpleSendMail:
 
         if bcc_recipient_emails is not None:
             self._logger.info("Message will be sent to list of BCC recipients.")
-            self._logger.debug(f"bcc_recipient_emails list was provided - adding BCC recipients to payload: {bcc_recipient_emails}")
+            self._logger.debug(
+                f"bcc_recipient_emails list was provided - adding BCC recipients to payload: {bcc_recipient_emails}"
+            )
             mail_playload["message"].update({"bccRecipients": []})
 
             for bcc_email in bcc_recipient_emails:
@@ -464,57 +516,71 @@ class SimpleSendMail:
             )
 
         # Adding file attachment(s) if any provided.
-        if attachments is not None:            
-            self._logger.info("Email attachment(s) provided and will be attached to message.")
+        if attachments is not None:
+            self._logger.info(
+                "Email attachment(s) provided and will be attached to message."
+            )
             mail_playload["message"].update({"hasAttachments": True, "attachments": []})
             if isinstance(attachments, list):
                 self._logger.debug("Adding multiple file attachments to mail payload.")
                 for attachment in attachments:
                     # Make sure it's of type SimpleFileAttachment before trying to add it
-                    if not isinstance(attachment,SimpleFileAttachment):
-                        self._logger.exception(f"Attachment at index {attachments.index(attachment)} is of type {type(attachment)} but must be of type SimpleFileAttachment.")
-                        raise TypeError(f"Attachment at index {attachments.index(attachment)} is of type {type(attachment)} but must be of type SimpleFileAttachment.")
+                    if not isinstance(attachment, SimpleFileAttachment):
+                        self._logger.exception(
+                            f"Attachment at index {attachments.index(attachment)} is of type {type(attachment)} but must be of type SimpleFileAttachment."
+                        )
+                        raise TypeError(
+                            f"Attachment at index {attachments.index(attachment)} is of type {type(attachment)} but must be of type SimpleFileAttachment."
+                        )
                     mail_playload["message"]["attachments"].append(dict(attachment))
                     self._logger.debug(f"Added attachment {str(attachment)}")
             else:
                 # Make sure attachment is of type SimpleFileAttachment
-                if not isinstance(attachments,SimpleFileAttachment):
-                    self._logger.exception(f"Attachment is of type {type(attachments)} but must be of type SimpleFileAttachment.")
-                    raise TypeError(f"Attachment is of type {type(attachments)} but must be of type SimpleFileAttachment.")
-                #self._logger.debug(f"A single file attachment was provided to function: {attachments.ATTACHMENT_FILENAME}")
+                if not isinstance(attachments, SimpleFileAttachment):
+                    self._logger.exception(
+                        f"Attachment is of type {type(attachments)} but must be of type SimpleFileAttachment."
+                    )
+                    raise TypeError(
+                        f"Attachment is of type {type(attachments)} but must be of type SimpleFileAttachment."
+                    )
+                # self._logger.debug(f"A single file attachment was provided to function: {attachments.ATTACHMENT_FILENAME}")
                 mail_playload["message"]["attachments"].append(dict(attachments))
-                #self._logger.debug(f"Added single attachment: {str(attachments)}")
+                # self._logger.debug(f"Added single attachment: {str(attachments)}")
 
         #self._logger.debug(f"Prepared mail body: {json.dumps(mail_playload,indent=4)}")
-        #Keep track of the number of tries, so if max retries is reached, we can raise err
-        try_count: int = 0
-        while try_count < self._max_retries:
-            try:
-                self._logger.debug(f"Trying to send mail via MS Graph API (Try #{try_count}/{self._max_retries})...")
-                # Try to send request and get a response
-                response = requests.post(url=mail_url, headers=headers, json=mail_playload)
-                #Increment the count of tries by 1
-                try_count+=1
-                response.raise_for_status()  # Make sure the response is 2xx status code
-                self._logger.info(
-                    f"Successfully sent email from {self._source_mail_address} to {recipient_emails}"
+        try:
+            self._logger.debug("Trying to send mail via MS Graph API")
+            # Sending a post request to MS Graph API
+            response = requests.post(url=mail_url, headers=headers, json=mail_playload)
+            # Checks the status code of response, raises HTTPError if non-2XX
+            response.raise_for_status()
+            self._logger.info(
+                f"Successfully sent email from {self._source_mail_address} to {recipient_emails}"
+            )
+        # Catches HTTPError that might be raised by raise_for_status()
+        except requests.exceptions.HTTPError as http_err:
+            # If rate limit was exceeded
+            if response.status_code == 429:
+                # Do some warning logging
+                self._logger.warning(response.text)
+                self._logger.warning(
+                    "Rate limit was exceeded when trying to email "+
+                    f"{str(recipient_emails)}. Raising MsGraphRateLimitExceededError..."
                 )
-                break
-            # Catch a request error (such as non-2xx status code returned)
-            except requests.exceptions.HTTPError as http_err:
-                if response.status_code == 429:
-                    resp_headers=dict(response.headers)
-                    self._logger.warning(response.text)
-                    self._logger.warning(f"Rate limit was exceeded when trying to email {str(recipient_emails)}. Retrying in {resp_headers['Retry-After']} seconds...")
-                    time.sleep(int(resp_headers['Retry-After']))
-                    continue
-                else:
-                    self._logger.exception(http_err)
-                    raise http_err
-            except requests.exceptions.RequestException as e:
-                self._logger.debug(response.text)
-                self._logger.exception(
-                    f"An error occurred while attempting to send an email to {recipient_emails}"
+                # Raise an instance of MsGraphRateLimitExceededError
+                # Which includes the int value from the Retry-After header
+                # Which will be used in the wrapper's time.sleep() call
+                raise MsGraphRateLimitExceededError(
+                    message=str(http_err), retry_after=int(response.headers["Retry-After"])
                 )
-                self._logger.exception(e)
-                raise e
+            # If the status code was not 429, but something else, raise it
+            else:
+                self._logger.exception(http_err)
+                raise http_err
+        except requests.exceptions.RequestException as e:
+            self._logger.debug(response.text)
+            self._logger.exception(
+                f"An error occurred while attempting to send an email to {recipient_emails}"
+            )
+            self._logger.exception(e)
+            raise e
