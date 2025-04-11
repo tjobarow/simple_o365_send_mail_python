@@ -3,11 +3,11 @@
 """
 @File    :   SimpleSendMailMsGraph.py
 @Time    :   2025/01/27 09:14:11
-@Author  :   Thomas Obarowski 
+@Author  :   Thomas Obarowski
 @Version :   1.0
 @Contact :   tjobarow@gmail.com
 @License :   MIT License
-@Desc    :   A lightweight wrapper over the MSGraph API that makes it easier 
+@Desc    :   A lightweight wrapper over the MSGraph API that makes it easier
 to send simple emails (with option attachments) via Python.
 """
 # Modules for EmailImportance
@@ -150,7 +150,7 @@ class SimpleFileAttachment:
 
     def __str__(self) -> str:
         bytes_removed: dict = self.__dict__().copy()
-        bytes_removed.pop('contentBytes')
+        bytes_removed.pop("contentBytes")
         return json.dumps(bytes_removed, indent=2)
 
 
@@ -165,7 +165,7 @@ class SimpleSendMail:
         oauth_scopes: list = ["https://graph.microsoft.com/.default"],
         verbose: bool = False,
         log_mail_payloads: bool = False,
-        max_retries: int = 5
+        max_retries: int = 5,
     ):
         """Initalizes the SimpleSendMail class.
 
@@ -438,8 +438,8 @@ class SimpleSendMail:
                         "MSGraph rate limit was exceeded."
                         + f" Retrying in {error.retry_after} seconds..."
                     )
-                    #Enable for testing max retries
-                    #time.sleep(1)
+                    # Enable for testing max retries
+                    # time.sleep(1)
                     time.sleep(error.retry_after)
                     req_attempt += 1
             self._logger.warning(
@@ -452,6 +452,7 @@ class SimpleSendMail:
                 + f"request being made. (Retry Counter: {req_attempt} - "
                 + f"Max Retries: {self._max_retries})"
             )
+
         return wrapper
 
     @retry_request
@@ -583,13 +584,17 @@ class SimpleSendMail:
                     raise TypeError(
                         f"Attachment is of type {type(attachments)} but must be of type SimpleFileAttachment."
                     )
-                self._logger.debug(f"A single file attachment was provided to function: {attachments.ATTACHMENT_FILENAME}")
+                self._logger.debug(
+                    f"A single file attachment was provided to function: {attachments.ATTACHMENT_FILENAME}"
+                )
                 mail_playload["message"]["attachments"].append(dict(attachments))
                 self._logger.debug(f"Added single attachment: {str(attachments)}")
-        
+
         if self._log_mail_payloads:
-            self._logger.debug(f"Prepared mail body: {json.dumps(mail_playload,indent=4)}")
-        
+            self._logger.debug(
+                f"Prepared mail body: {json.dumps(mail_playload,indent=4)}"
+            )
+
         try:
             self._logger.debug("Trying to send mail via MS Graph API")
             # Sending a post request to MS Graph API
@@ -606,14 +611,15 @@ class SimpleSendMail:
                 # Do some warning logging
                 self._logger.warning(response.text)
                 self._logger.warning(
-                    "Rate limit was exceeded when trying to email "+
-                    f"{str(recipient_emails)}. Raising MsGraphRateLimitExceededError..."
+                    "Rate limit was exceeded when trying to email "
+                    + f"{str(recipient_emails)}. Raising MsGraphRateLimitExceededError..."
                 )
                 # Raise an instance of MsGraphRateLimitExceededError
                 # Which includes the int value from the Retry-After header
                 # Which will be used in the wrapper's time.sleep() call
                 raise MsGraphRateLimitExceededError(
-                    message=str(http_err), retry_after=int(response.headers["Retry-After"])
+                    message=str(http_err),
+                    retry_after=int(response.headers["Retry-After"]),
                 )
             # If the status code was not 429, but something else, raise it
             else:
@@ -626,3 +632,227 @@ class SimpleSendMail:
             )
             self._logger.exception(e)
             raise e
+
+    @retry_request
+    @check_token_validity
+    def _get_mail_folder(self, folder_name: str, user_principal_name: str) -> dict:
+        # TODO Need Mail.ReadWrite
+        self._logger.info(
+            f"Retrieving details for {folder_name} folder for user {user_principal_name}"
+        )
+
+        request_url: str = (
+            f"https://graph.microsoft.com/v1.0/users/{self._source_mail_address}/mailFolders/{folder_name}"
+        )
+        self._logger.debug(f"Constructed mail url {request_url}")
+
+        headers: dict[str] = {
+            "Authorization": f"{self.__oauth_token_info['token_type']} {self.__oauth_token_info['access_token']}",
+            "Content-Type": "application/json",
+        }
+        self._logger.debug("Defined HTTP request headers")
+
+        self._logger.debug(f"Sending get request to {request_url}")
+
+        try:
+            response = requests.get(url=request_url)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as err:
+            if response.status_code == 401:
+                self._logger.exception(
+                    f"MSGraph API returned a status code of 401 - Unauthorized. Please validate your application has proper permissions to a mailFolder request."
+                )
+                self._logger.exception(err)
+                raise (err)
+            else:
+                self._logger.exception(
+                    f"An unexcepted HTTP error occurred while attempting to get details for mailFolder {folder_name}"
+                )
+                self._logger.exception(err)
+                raise (err)
+        except requests.exceptions.RequestException as err:
+            self._logger.exception(
+                f"An unexcepted request error occurred while attempting to get details for mailFolder {folder_name}"
+            )
+            self._logger.exception(err)
+            raise (err)
+
+    @retry_request
+    @check_token_validity
+    def list_message(
+        self,
+        folder_name: str,
+        user_principal_name: str,
+        filter: str | None = None,
+        search: str | None = None,
+        select: str | None = None,
+        page_size: int = 10,
+        return_count: bool = True,
+        adv_query_header: bool = False,
+        next_page_url: str | None = None
+    ) -> list:
+        self._logger.info(
+            f"Listing messages from {user_principal_name} {folder_name} folder."
+        )
+
+        # Construct default empty params
+        params: dict[str:str] = {}
+        self._logger.debug("Defined base params")
+        
+        headers: dict[str] = {
+                "Authorization": f"{self.__oauth_token_info['token_type']} {self.__oauth_token_info['access_token']}",
+                "Content-Type": "application/json",
+            }
+        self._logger.debug("Defined base HTTP request headers")
+
+        if not next_page_url:
+            
+            if filter and search:
+                raise Exception(
+                    "You cannot provide both a filter and search parmater to MSGraph API at the same time."
+                )
+
+            if filter:
+                self._logger.debug(
+                    f"Filter string {filter} supplied. Adding to request parameters."
+                )
+                params.update({"$filter": filter})
+
+            if search:
+                self._logger.debug(
+                    f"Search string {search} supplied. Adding to request parameters"
+                )
+                params.update({"$search": search})
+                
+            if select:
+                self._logger.debug(
+                    f"Following fields selected to be returned: {select}. Adding to request parameters"
+                )
+                params.update({"$select": select})
+
+            if page_size:
+                self._logger.debug(f"Setting page size to {page_size}")
+                params.update({"$top": page_size})
+
+            if return_count:
+                self._logger.debug(f"Response to include resource count: {return_count}")
+                params.update({"$count": str(return_count).lower()})
+                
+            if adv_query_header or filter:
+                self._logger.debug("Flag set to enable advanced query options. Adding header 'ConsistencyLevel=eventual'")
+                headers.update({
+                    'ConsistencyLevel':'eventual',
+                    '$count':'true'
+                })
+                
+            request_url: str = (
+            f"https://graph.microsoft.com/v1.0/users/{self._source_mail_address}/mailFolders/{folder_name}/messages"
+            )
+        else:
+            request_url: str = next_page_url
+
+        self._logger.debug(
+            f"Sending get request to {request_url} using parameters {params}"
+        )
+
+        try:
+            # Empty list for returned messages
+            messages: list[dict] = []
+            # Make inital request for messages
+            response = requests.get(url=request_url, params=params, headers=headers)
+            response.raise_for_status()
+
+            self._logger.debug(
+                f"API returned {len(response.json().get('value'))} messages."
+            )
+
+            # Add returned messages to list of messages
+            messages.extend(response.json().get("value"))
+
+            # This loop will run while the response body contents link to next page of data
+            if "@odata.nextLink" in response.json():
+                self._logger.debug("Sending recursive function call for additional page of messages from API")
+                # Extract next page URL returned my msft
+                next_page_url: str = response.json().get("@odata.nextLink")
+                # Make recursive call to fetch additional pages of data
+                addt_msgs = self.list_message(folder_name=folder_name, user_principal_name=user_principal_name, next_page_url=next_page_url)
+                messages.extend(addt_msgs)
+                # Then loop and check if the response has link to next page of data again
+
+            self._logger.debug(
+                f"Returning {len(messages)} messages retrieved from the API"
+            )
+            return messages
+
+        except requests.exceptions.HTTPError as err:
+            if response.status_code == 400:
+                self._logger.exception(
+                    f"MSGraph API returned a status code of 400 - Bad request, and provided an error message of '{response.json().get('error').get('message')}'"
+                )
+                raise (err)
+            if response.status_code == 401:
+                self._logger.exception(
+                    f"MSGraph API returned a status code of 401 - Unauthorized. Please validate your application has proper permissions to make a listMessages request."
+                )
+                raise (err)
+            else:
+                self._logger.exception(
+                    f"An unexcepted HTTP error occurred while attempting to get details for mailFolder {folder_name}"
+                )
+                # self._logger.exception(err)
+                raise (err)
+        except requests.exceptions.RequestException as err:
+            self._logger.exception(
+                f"An unexcepted request error occurred while attempting to get details for mailFolder {folder_name}"
+            )
+            self._logger.exception(err)
+            raise (err)
+    
+    @retry_request
+    @check_token_validity
+    def delete_message(self, user_principal_name: str, message_id: str) -> None:
+        self._logger.debug(f"Deleting message id {message_id} for user {user_principal_name}")
+        #Define headers for API call
+        headers: dict[str] = {
+                "Authorization": f"{self.__oauth_token_info['token_type']} {self.__oauth_token_info['access_token']}",
+                "Content-Type": "application/json",
+            }
+        self._logger.debug("Defined base HTTP request headers")
+        # Define URL
+        request_url: str = f"https://graph.microsoft.com/v1.0/users/{user_principal_name}/messages/{message_id}"
+        self._logger.debug(f"Defined request URL: {request_url}")
+        
+        try:
+            response = requests.delete(url=request_url, headers=headers)
+            response.raise_for_status()
+            self._logger.info(f"Successfully deleted message id {message_id} from mailbox of {user_principal_name}")
+        except requests.exceptions.HTTPError as err:
+            if response.status_code == 400:
+                self._logger.exception(
+                    f"MSGraph API returned a status code of 400 - Bad Request, and provided an error message of '{response.json().get('error').get('message')}'"
+                )
+                raise (err)
+            if response.status_code == 401:
+                self._logger.exception(
+                    f"MSGraph API returned a status code of 401 - Unauthorized. Please validate your application has proper permissions to make delete request."
+                )
+                raise (err)
+            if response.status_code == 404:
+                self._logger.exception(
+                    f"MSGraph API returned a status code of 404 - Resource Not Found. Please validate the message id for accuracy."
+                )
+                raise (err)
+            else:
+                self._logger.exception(
+                    f"An unexcepted HTTP error occurred while attempting to delete message {message_id}"
+                )
+                # self._logger.exception(err)
+                raise (err)
+        except requests.exceptions.RequestException as err:
+            self._logger.exception(
+                f"An unexcepted request error occurred while attempting to delete message {message_id}"
+            )
+            self._logger.exception(err)
+            raise (err)
+        
